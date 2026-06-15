@@ -9,7 +9,7 @@
 
 為了方便使用，所有工具皆已透過 **GitHub Releases** 打包為獨立的免安裝執行檔（`.exe` 壓縮包）。你不需要安裝 Python 環境即可直接使用！
 
-* 👉 **[前往 Release 頁面下載最新版工具]([這裡填入你儲存庫的 release 主頁網址](https://github.com/yoo4436/Tools/releases))**
+* 👉 **([前往 Release 頁面下載最新版工具](https://github.com/yoo4436/Tools/releases))**
 
 ---
 
