@@ -1,4 +1,5 @@
 import os
+import json
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
@@ -6,10 +7,42 @@ import customtkinter as ctk
 ctk.set_appearance_mode("Light")  
 ctk.set_default_color_theme("blue") 
 
-# 全域變數
+# 將歷史紀錄檔路徑指定在 _internal 資料夾內
+# 如果是在開發環境下跑 .py，會自動建立 _internal 資料夾
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+INTERNAL_DIR = os.path.join(CURRENT_DIR, "_internal")
+HISTORY_FILE = os.path.join(INTERNAL_DIR, ".rename_history.json")
+
 selected_files = []
-# 用來記錄上一次改名的歷史紀錄，格式為：[(新路徑1, 舊路徑1), (新路徑2, 舊路徑2), ...]
-rename_history = []
+
+def ensure_internal_dir():
+    """確保 _internal 資料夾存在，避免寫入失敗"""
+    if not os.path.exists(INTERNAL_DIR):
+        os.makedirs(INTERNAL_DIR)
+
+def save_history_to_file(history_data):
+    try:
+        ensure_internal_dir()
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history_data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"儲存歷史紀錄失敗: {e}")
+
+def load_history_from_file():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def delete_history_file():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            os.remove(HISTORY_FILE)
+        except Exception as e:
+            print(f"刪除紀錄檔失敗: {e}")
 
 def select_files():
     global selected_files
@@ -25,7 +58,7 @@ def select_files():
         lbl_status.configure(text=f"已選取 {len(selected_files)} 個檔案", text_color="#0078D7")
 
 def run_rename():
-    global selected_files, rename_history
+    global selected_files
     if not selected_files:
         messagebox.showwarning("警告", "請先選擇要處理的檔案！")
         return
@@ -39,9 +72,7 @@ def run_rename():
 
     success_count = 0
     error_count = 0
-    
-    # 每次開始新改名時，先清空上一次的歷史紀錄
-    rename_history = []
+    current_rename_history = []
 
     for file_path in selected_files:
         if os.path.exists(file_path):
@@ -52,57 +83,72 @@ def run_rename():
             new_base_name = f"{prefix}{file_name}{suffix}{file_ext}"
             new_file_path = os.path.join(dir_name, new_base_name)
             
-            # 如果新舊名稱完全一樣，就跳過不做
             if file_path == new_file_path:
                 continue
                 
             try:
                 os.rename(file_path, new_file_path)
-                # 成功改名後，記錄下來（注意：復原時是要從 新路徑 改回 舊路徑）
-                rename_history.append((new_file_path, file_path))
+                current_rename_history.append([new_file_path, file_path])
                 success_count += 1
             except Exception:
                 error_count += 1
 
     messagebox.showinfo("處理完成", f"重新命名結束！\n成功：{success_count} 個\n失敗：{error_count} 個")
     
-    # 重新命名成功後，啟用「還原」按鈕
-    if rename_history:
+    if current_rename_history:
+        save_history_to_file(current_rename_history)
         btn_undo.configure(state="normal", fg_color="#D9534F", hover_color="#C9302C")
     
-    # 清空選擇列表與預覽，方便下一波操作
     selected_files = []
     text_preview.delete("1.0", "end")
     lbl_status.configure(text="尚未選取檔案", text_color="gray")
 
-# 新增：還原上一步的邏輯
 def undo_rename():
-    global rename_history
+    rename_history = load_history_from_file()
+    
     if not rename_history:
         messagebox.showwarning("提示", "目前沒有可以還原的紀錄！")
+        btn_undo.configure(state="disabled", fg_color="gray")
         return
         
+    # 提示優化 1：二次彈窗確認，防止誤觸
+    confirm = messagebox.askyesno("確認還原", f"您確定要將這 {len(rename_history)} 個檔案還原為上一步的名稱嗎？")
+    if not confirm:
+        return # 使用者點選「否」，直接取消離開
+
     undo_success = 0
-    undo_error = 0
+    restored_names = []
     
-    # 從最新的紀錄開始倒回去改名字
     for new_path, old_path in rename_history:
         try:
             if os.path.exists(new_path):
                 os.rename(new_path, old_path)
                 undo_success += 1
+                # 記錄被還原回來的舊檔名
+                restored_names.append(os.path.basename(old_path))
         except Exception:
-            undo_error += 1
+            pass
             
+    # 提示優化 2：還原成功後，把改回來的名單秀在中間的預覽框，讓使用者一目了然
+    text_preview.delete("1.0", "end")
+    text_preview.insert("end", "--- 已成功還原以下檔案的名稱 ---\n")
+    for name in restored_names:
+        text_preview.insert("end", f"{name}\n")
+        
+    lbl_status.configure(text=f"已成功還原 {undo_success} 個檔案", text_color="#23b074")
+    
     messagebox.showinfo("還原完成", f"已執行還原！\n成功還原：{undo_success} 個檔案")
     
-    # 還原後清空歷史紀錄，並禁用還原按鈕
-    rename_history = []
+    delete_history_file()
     btn_undo.configure(state="disabled", fg_color="gray")
+
+def check_existing_history():
+    if os.path.exists(HISTORY_FILE):
+        btn_undo.configure(state="normal", fg_color="#D9534F", hover_color="#C9302C")
 
 # ================= 建立 CustomTkinter 視窗 =================
 root = ctk.CTk()
-root.title("檔案批次重新命名工具 (內建復原功能)")
+root.title("檔案批次重新命名工具")
 root.geometry("600x520")
 root.resizable(False, False)
 
@@ -114,7 +160,7 @@ lbl_status = ctk.CTkLabel(root, text="尚未選取檔案", font=("Arial", 12), t
 lbl_status.pack()
 
 # 2. 檔案預覽區
-lbl_preview = ctk.CTkLabel(root, text="已選取的檔案清單預覽：", font=("Arial", 12, "bold"))
+lbl_preview = ctk.CTkLabel(root, text="檔案清單預覽 / 還原狀態顯示：", font=("Arial", 12, "bold"))
 lbl_preview.pack(anchor="w", padx=40, pady=(10, 2))
 
 text_preview = ctk.CTkTextbox(root, width=520, height=150, corner_radius=8)
@@ -134,11 +180,10 @@ lbl_suffix.grid(row=0, column=2, padx=10, pady=5, sticky="e")
 entry_suffix = ctk.CTkEntry(frame_settings, width=150, corner_radius=8, placeholder_text="例如: -已確認")
 entry_suffix.grid(row=0, column=3, padx=5, pady=5)
 
-# 4. 按鈕控制區（放一左一右，排版更好看）
+# 4. 按鈕控制區
 frame_buttons = ctk.CTkFrame(root, fg_color="transparent")
 frame_buttons.pack(pady=20)
 
-# 執行改名按鈕 (藍色)
 btn_run = ctk.CTkButton(
     frame_buttons, 
     text="開始批次重新命名", 
@@ -152,7 +197,6 @@ btn_run = ctk.CTkButton(
 )
 btn_run.grid(row=0, column=0, padx=15)
 
-# 復原按鈕 (平常是灰色的不能點，只有在剛改完名後會變成紅色可點擊)
 btn_undo = ctk.CTkButton(
     frame_buttons, 
     text="↩ 還原上一步", 
@@ -165,5 +209,8 @@ btn_undo = ctk.CTkButton(
     command=undo_rename
 )
 btn_undo.grid(row=0, column=1, padx=15)
+
+# 啟動時檢查
+check_existing_history()
 
 root.mainloop()
