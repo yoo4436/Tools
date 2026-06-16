@@ -49,10 +49,23 @@ def select_files():
     )
     if files:
         selected_files = list(files)
+        # 自動切換到「檔案預覽」分頁
+        tab_view.set("檔案預覽")
         text_preview.delete("1.0", "end")
         for f in selected_files:
             text_preview.insert("end", f"{os.path.basename(f)}\n")
         lbl_status.configure(text=f"已選取 {len(selected_files)} 個檔案", text_color="#0078D7")
+
+# 動態切換功能模式
+def switch_mode(choice):
+    if choice == "加前後綴模式":
+        # 顯示前後綴，隱藏取代
+        frame_prefix_suffix.pack(pady=10, before=frame_buttons)
+        frame_replace.pack_forget()
+    elif choice == "關鍵字取代模式":
+        # 顯示取代，隱藏前後綴
+        frame_replace.pack(pady=10, before=frame_buttons)
+        frame_prefix_suffix.pack_forget()
 
 def run_rename():
     global selected_files
@@ -60,16 +73,7 @@ def run_rename():
         messagebox.showwarning("警告", "請先選擇要處理的檔案！")
         return
         
-    prefix = entry_prefix.get()
-    suffix = entry_suffix.get()
-    find_str = entry_find.get()
-    replace_str = entry_replace.get()
-    
-    # 檢查防呆：如果什麼功能都沒填，就提出警告
-    if not prefix and not suffix and not find_str:
-        messagebox.showwarning("警告", "請至少輸入前綴、後綴或要取代的文字！")
-        return
-
+    mode = combo_mode.get()
     success_count = 0
     error_count = 0
     current_rename_history = []
@@ -80,13 +84,24 @@ def run_rename():
             base_name = os.path.basename(file_path)    
             file_name, file_ext = os.path.splitext(base_name) 
             
-            # 核心取代邏輯：如果填了「尋找文字」，就執行取代
-            if find_str:
+            # 根據目前選取的模式跑對應邏輯
+            if mode == "加前後綴模式":
+                prefix = entry_prefix.get()
+                suffix = entry_suffix.get()
+                if not prefix and not suffix:
+                    messagebox.showwarning("警告", "請輸入前綴或後綴！")
+                    return
+                file_name = f"{prefix}{file_name}{suffix}"
+                
+            elif mode == "關鍵字取代模式":
+                find_str = entry_find.get()
+                replace_str = entry_replace.get()
+                if not find_str:
+                    messagebox.showwarning("警告", "請輸入要搜尋的文字！")
+                    return
                 file_name = file_name.replace(find_str, replace_str)
             
-            # 組合新檔名（前綴 + 處理後的檔名 + 後綴 + 副檔名）
-            new_base_name = f"{prefix}{file_name}{suffix}{file_ext}"
-            new_file_path = os.path.join(dir_name, new_base_name)
+            new_file_path = os.path.join(dir_name, f"{file_name}{file_ext}")
             
             if file_path == new_file_path:
                 continue
@@ -107,14 +122,9 @@ def run_rename():
     selected_files = []
     text_preview.delete("1.0", "end")
     lbl_status.configure(text="尚未選取檔案", text_color="gray")
-    
-    # 清空輸入框（選填，若想保留輸入可註解掉）
-    entry_find.delete(0, "end")
-    entry_replace.delete(0, "end")
 
 def undo_rename():
     rename_history = load_history_from_file()
-    
     if not rename_history:
         messagebox.showwarning("提示", "目前沒有可以還原的紀錄！")
         btn_undo.configure(state="disabled", fg_color="gray")
@@ -136,10 +146,12 @@ def undo_rename():
         except Exception:
             pass
             
-    text_preview.delete("1.0", "end")
-    text_preview.insert("end", "--- 已成功還原以下檔案的名稱 ---\n")
+    # 優化：自動切換到「還原狀態」分頁顯示結果
+    tab_view.set("還原狀態顯示")
+    text_undo.delete("1.0", "end")
+    text_undo.insert("end", f"成功還原 {undo_success} 個檔案：\n\n")
     for name in restored_names:
-        text_preview.insert("end", f"{name}\n")
+        text_undo.insert("end", f"↩ {name}\n")
         
     lbl_status.configure(text=f"已成功還原 {undo_success} 個檔案", text_color="#23b074")
     messagebox.showinfo("還原完成", f"已執行還原！\n成功還原：{undo_success} 個檔案")
@@ -153,81 +165,82 @@ def check_existing_history():
 
 # ================= 建立 CustomTkinter 視窗 =================
 root = ctk.CTk()
-root.title("檔案批次重新命名工具 v1.2")
-root.geometry("620x580") # 稍微拉高視窗以容納新欄位
+root.title("檔案批次重新命名工具 v1.3")
+root.geometry("620x540")
 root.resizable(False, False)
 
-# 1. 選擇檔案區
-btn_browse = ctk.CTkButton(root, text="選取檔案 (可多選)", width=150, corner_radius=8, command=select_files)
-btn_browse.pack(pady=15)
+# 頂部控制列 (選取檔案與功能模式切換)
+frame_top = ctk.CTkFrame(root, fg_color="transparent")
+frame_top.pack(pady=15, fill="x", padx=40)
+
+btn_browse = ctk.CTkButton(frame_top, text="選取檔案 (可多選)", width=150, corner_radius=8, command=select_files)
+btn_browse.pack(side="left")
+
+# 下拉選單切換功能模式
+combo_mode = ctk.CTkOptionMenu(
+    frame_top, 
+    values=["加前後綴模式", "關鍵字取代模式"], 
+    command=switch_mode,
+    width=160,
+    corner_radius=8
+)
+combo_mode.pack(side="right")
 
 lbl_status = ctk.CTkLabel(root, text="尚未選取檔案", font=("Arial", 12), text_color="gray")
-lbl_status.pack()
+lbl_status.pack(pady=(0, 5))
 
-# 2. 檔案預覽區
-lbl_preview = ctk.CTkLabel(root, text="檔案清單預覽 / 還原狀態顯示：", font=("Arial", 12, "bold"))
-lbl_preview.pack(anchor="w", padx=40, pady=(10, 2))
+# 使用 CTkTabview 做成美觀的分頁格子
+tab_view = ctk.CTkTabview(root, width=540, height=200, corner_radius=8)
+tab_view.pack(pady=5)
+tab_view.add("檔案預覽")
+tab_view.add("還原狀態顯示")
 
-text_preview = ctk.CTkTextbox(root, width=540, height=140, corner_radius=8)
-text_preview.pack(pady=5)
+# 分頁 1：預覽文字框
+text_preview = ctk.CTkTextbox(tab_view.tab("檔案預覽"), width=520, height=140, corner_radius=4)
+text_preview.pack(fill="both", expand=True)
 
-# 3. 命名參數設定區（包含舊功能與新功能）
-frame_settings = ctk.CTkFrame(root, fg_color="transparent")
-frame_settings.pack(pady=10)
-
-# --- 功能：加前後綴 ---
-lbl_prefix = ctk.CTkLabel(frame_settings, text="加前綴 (Prefix):", font=("Arial", 12))
-lbl_prefix.grid(row=0, column=0, padx=10, pady=8, sticky="e")
-entry_prefix = ctk.CTkEntry(frame_settings, width=150, corner_radius=8, placeholder_text="不加請留空")
-entry_prefix.grid(row=0, column=1, padx=5, pady=8)
-
-lbl_suffix = ctk.CTkLabel(frame_settings, text="加後綴 (Suffix):", font=("Arial", 12))
-lbl_suffix.grid(row=0, column=2, padx=10, pady=8, sticky="e")
-entry_suffix = ctk.CTkEntry(frame_settings, width=150, corner_radius=8, placeholder_text="不加請留空")
-entry_suffix.grid(row=0, column=3, padx=5, pady=8)
-
-# --- 功能：文字取代區 (Find & Replace) ---
-lbl_find = ctk.CTkLabel(frame_settings, text="搜尋文字 (Find):", font=("Arial", 12, "bold"), text_color="#D9534F")
-lbl_find.grid(row=1, column=0, padx=10, pady=8, sticky="e")
-entry_find = ctk.CTkEntry(frame_settings, width=150, corner_radius=8, placeholder_text="例如: CE-102-1")
-entry_find.grid(row=1, column=1, padx=5, pady=8)
-
-lbl_replace = ctk.CTkLabel(frame_settings, text="取代為 (Replace):", font=("Arial", 12, "bold"), text_color="#23b074")
-lbl_replace.grid(row=1, column=2, padx=10, pady=8, sticky="e")
-entry_replace = ctk.CTkEntry(frame_settings, width=150, corner_radius=8, placeholder_text="例如: CE-106-3")
-entry_replace.grid(row=1, column=3, padx=5, pady=8)
+# 分頁 2：還原狀態文字框
+text_undo = ctk.CTkTextbox(tab_view.tab("還原狀態顯示"), width=520, height=140, corner_radius=4)
+text_undo.pack(fill="both", expand=True)
 
 
-# 4. 按鈕控制區
+# --- 隱藏式容器 1：前後綴模式介面 ---
+frame_prefix_suffix = ctk.CTkFrame(root, fg_color="transparent")
+lbl_prefix = ctk.CTkLabel(frame_prefix_suffix, text="加前綴 (Prefix):", font=("Arial", 12))
+lbl_prefix.grid(row=0, column=0, padx=10, pady=5, sticky="e")
+entry_prefix = ctk.CTkEntry(frame_prefix_suffix, width=150, corner_radius=8, placeholder_text="不加請留空")
+entry_prefix.grid(row=0, column=1, padx=5, pady=5)
+
+lbl_suffix = ctk.CTkLabel(frame_prefix_suffix, text="加後綴 (Suffix):", font=("Arial", 12))
+lbl_suffix.grid(row=0, column=2, padx=10, pady=5, sticky="e")
+entry_suffix = ctk.CTkEntry(frame_prefix_suffix, width=150, corner_radius=8, placeholder_text="不加請留空")
+entry_suffix.grid(row=0, column=3, padx=5, pady=5)
+
+# --- 隱藏式容器 2：關鍵字取代模式介面 ---
+frame_replace = ctk.CTkFrame(root, fg_color="transparent")
+lbl_find = ctk.CTkLabel(frame_replace, text="搜尋文字 (Find):", font=("Arial", 12, "bold"), text_color="#D9534F")
+lbl_find.grid(row=0, column=0, padx=10, pady=5, sticky="e")
+entry_find = ctk.CTkEntry(frame_replace, width=150, corner_radius=8, placeholder_text="例如: CE-102-1")
+entry_find.grid(row=0, column=1, padx=5, pady=5)
+
+lbl_replace = ctk.CTkLabel(frame_replace, text="取代為 (Replace):", font=("Arial", 12, "bold"), text_color="#23b074")
+lbl_replace.grid(row=0, column=2, padx=10, pady=5, sticky="e")
+entry_replace = ctk.CTkEntry(frame_replace, width=150, corner_radius=8, placeholder_text="例如: CE-106-3")
+entry_replace.grid(row=0, column=3, padx=5, pady=5)
+
+
+# 底部按鈕控制區
 frame_buttons = ctk.CTkFrame(root, fg_color="transparent")
-frame_buttons.pack(pady=20)
+frame_buttons.pack(pady=25)
 
-btn_run = ctk.CTkButton(
-    frame_buttons, 
-    text="開始批次重新命名", 
-    fg_color="#0078D7",      
-    hover_color="#005A9E",   
-    height=42,
-    width=180,
-    corner_radius=20,
-    font=("Arial", 14, "bold"),
-    command=run_rename
-)
+btn_run = ctk.CTkButton(frame_buttons, text="開始批次重新命名", fg_color="#0078D7", hover_color="#005A9E", height=42, width=180, corner_radius=20, font=("Arial", 14, "bold"), command=run_rename)
 btn_run.grid(row=0, column=0, padx=15)
 
-btn_undo = ctk.CTkButton(
-    frame_buttons, 
-    text="↩ 還原上一步", 
-    fg_color="gray",      
-    state="disabled",
-    height=42,
-    width=150,
-    corner_radius=20,
-    font=("Arial", 14, "bold"),
-    command=undo_rename
-)
+btn_undo = ctk.CTkButton(frame_buttons, text="↩ 還原上一步", fg_color="gray", state="disabled", height=42, width=150, corner_radius=20, font=("Arial", 14, "bold"), command=undo_rename)
 btn_undo.grid(row=0, column=1, padx=15)
 
+# 預設啟動模式
+switch_mode("加前後綴模式")
 check_existing_history()
 
 root.mainloop()
